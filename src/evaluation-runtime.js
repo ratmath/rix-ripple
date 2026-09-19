@@ -98,7 +98,7 @@ export class RixCelEvaluationSession {
 
     commit(value) {
         const candidate = parseRixCelDocument(value);
-        if (!sameHistoryPrefix(this.document, candidate)) return this.open(candidate);
+        if (!sameHistoryPrefix(this.document, candidate) || candidate.events.at(-1)?.type === "axis:insert") return this.open(candidate);
         try {
             this.applyEvent(candidate.events.at(-1));
             this.document = candidate;

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    RIXCEL_VERSION,
     createRixCelDocument,
     appendRixCelEvent,
 } from "../../../rix/src/index.js";
@@ -46,7 +47,7 @@ describe("RiXCel worker evaluation runtime", () => {
             header: true,
             id: "csv-worker",
         });
-        expect(result.document.version).toBe(2);
+        expect(result.document.version).toBe(RIXCEL_VERSION);
         expect(result.document.shape).toEqual([1, 2]);
         expect(result.document.events).toHaveLength(2);
     });
@@ -72,4 +73,21 @@ describe("RiXCel worker evaluation runtime", () => {
         expect(second.window).toEqual({ rowStart: 991, rowCount: 10, columnStart: 996, columnCount: 5 });
         expect((second.html.match(/<td /gu) || [])).toHaveLength(50);
     });
+});
+
+test('structural worker replacement is atomic and parse failures retain a usable session', () => {
+    let document = createRixCelDocument({ id: 'atomic-insert', shape: [2,2] });
+    document = appendRixCelEvent(document, { type:'slot:set',index:[1,1],source:'5/7' });
+    const session = new RixCelEvaluationSession().open(document);
+    const previous = session.model;
+    const inserted = appendRixCelEvent(document, { type:'axis:insert',axis:1,coordinate:1 });
+    session.commit(inserted);
+    expect(previous.shape).toEqual([2,2]);
+    expect(session.model.shape).toEqual([3,2]);
+    expect(session.model.slot([2,1]).id).toBe(previous.slot([1,1]).id);
+    const valid = session.model;
+    expect(() => session.commit(appendRixCelEvent(inserted, { type:'slot:set',index:[1,1],source:'1+' }))).toThrow();
+    expect(session.document).toEqual(inserted);
+    expect(session.model.shape).toEqual(valid.shape);
+    expect(session.project().html).toContain('5/7');
 });

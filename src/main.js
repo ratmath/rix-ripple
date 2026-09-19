@@ -32,6 +32,8 @@ let projection = null;
 let name = "Untitled.rixcel";
 let dirty = false;
 let sessionFloorCursor = 0;
+let selectedIndex = [1,1];
+let pendingCommit = false;
 const viewport = { rowStart: 1, rowCount: 40, columnStart: 1, columnCount: 12 };
 
 function setStatus(message) {
@@ -39,8 +41,8 @@ function setStatus(message) {
 }
 
 function updateHistoryButtons() {
-    undoButton.disabled = !documentLog || documentLog.cursor <= sessionFloorCursor;
-    redoButton.disabled = !documentLog || documentLog.cursor >= documentLog.events.length;
+    undoButton.disabled = pendingCommit || !documentLog || documentLog.cursor <= sessionFloorCursor;
+    redoButton.disabled = pendingCommit || !documentLog || documentLog.cursor >= documentLog.events.length;
 }
 
 function updateWindowControls() {
@@ -92,10 +94,12 @@ function errorKind(message) {
 
 function renderProjection(nextProjection) {
     projection = nextProjection;
-    Object.assign(viewport, nextProjection.window);
+    // Preserve requested window capacity when a small document clips the projection.
+    Object.assign(viewport, { rowStart: nextProjection.window.rowStart, columnStart: nextProjection.window.columnStart });
     host.innerHTML = nextProjection.html;
     enhanceSheetViews(host, {
         onSelection(detail) {
+            selectedIndex = [...detail.index];
             setStatus(detail.coordinateLabel || detail.address);
         },
         async onEdit(detail) {
@@ -159,6 +163,10 @@ function renderProjection(nextProjection) {
 }
 
 async function commitEvent(event) {
+    if (pendingCommit) throw new Error("An edit is still being saved; try again when it finishes");
+    pendingCommit = true;
+    updateHistoryButtons();
+    try {
     let next = documentLog;
     const edits = event.type === "slot:batch" ? event.edits : event.type === "slot:set" ? [event] : [];
     for (const edit of edits) next = clearRixCelDraft(next, edit.index);
@@ -171,13 +179,21 @@ async function commitEvent(event) {
         ? `Saved ${event.edits.length} cells locally · event ${documentLog.cursor} · epoch ${result.epoch}`
         : `Saved locally · event ${documentLog.cursor} · epoch ${result.epoch}`);
     return result;
+    } finally { pendingCommit = false; updateHistoryButtons(); }
+}
+
+async function insertAxis(axis) {
+    const coordinate = Math.min(selectedIndex[axis-1] || 1, documentLog.shape[axis-1]);
+    const result = await commitEvent({ type: "axis:insert", axis, coordinate, count: 1 });
+    renderProjection(result);
+    setStatus(`Inserted ${axis===1?"row":"column"} ${coordinate}; references updated`);
 }
 
 function bindProjection(result, nextName, { resetSession = true } = {}) {
     documentLog = parseRixCelDocument(result.document);
     name = nextName || "Untitled.rixcel";
     documentName.textContent = name;
-    if (resetSession) sessionFloorCursor = documentLog.cursor;
+    if (resetSession) sessionFloorCursor = 0; // Saved history remains undoable after restart/open.
     renderProjection(result);
     persistRecovery();
 }
@@ -243,6 +259,7 @@ async function openFile(file) {
 }
 
 async function restoreCursor(cursor) {
+    if (pendingCommit) throw new Error("An edit is still being saved");
     if (!documentLog || cursor < sessionFloorCursor || cursor > documentLog.events.length) return;
     const candidate = setRixCelCursor(documentLog, cursor);
     const result = await evaluationWorker.request({ type: "open", document: candidate, window: viewport });
@@ -277,6 +294,11 @@ async function allowDocumentSwitch() {
 
 document.addEventListener("click", async (event) => {
     const action = event.target.closest("[data-action]")?.dataset.action;
+    if (pendingCommit) { setStatus("An edit is still being saved"); return; }
+    if (action === "insert-row" || action === "insert-column") {
+        insertAxis(action === "insert-row" ? 1 : 2).catch(error=>setStatus(error.message));
+        return;
+    }
     if (!action) return;
     try {
         if (action === "new") {

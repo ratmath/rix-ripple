@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "bun scripts/build.js",
-    "test": "bun test"
+    "test": "bun test",
+    "test:browser": "bun scripts/check-browser.js"
   }
 }

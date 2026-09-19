@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "..");
-const output = path.join(root, "docs");
+const output = process.env.RIXCEL_BUILD_DIR ? path.resolve(process.env.RIXCEL_BUILD_DIR) : path.join(root, "docs");
 const assets = path.join(output, "assets");
 
 const browserNodeShims = {
