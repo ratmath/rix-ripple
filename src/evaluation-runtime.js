@@ -1,3 +1,4 @@
+import { createOutputBundleHost } from "../../../rix/src/runtime/output-bundle-host.js";
 import {
     Context,
     createDefaultRegistry,
@@ -64,7 +65,8 @@ function windowFor(shape, requested = {}) {
 
 /** Persistent, worker-owned FormulaSheet session and visible-plane projector. */
 export class RixCelEvaluationSession {
-    constructor() {
+    constructor({ assetStore, authorizeExternal = null } = {}) {
+        Object.assign(this, createOutputBundleHost({ assetStore, authorizeExternal, format: (value) => formatValue(value, { context: this.state.context, evaluate: null }) }));
         this.state = createRixCelEvaluationState();
         this.document = null;
         this.model = null;
