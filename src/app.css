@@ -1,3 +1,5 @@
+html.rixcel-root { height: auto; min-height: 100%; overflow: auto; background: #f7f8fc; }
+body.rixcel-app { height: auto; overflow: visible; }
 .rixcel-app { margin: 0; min-height: 100vh; color: #172033; background: #f7f8fc; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 .rixcel-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-bottom: 1px solid #d8deea; background: #fff; box-shadow: 0 1px 4px rgb(15 23 42 / 6%); }
 .rixcel-header > div { display: flex; align-items: baseline; gap: .6rem; }
@@ -29,3 +31,14 @@
   #document-name { order: 3; width: 100%; margin-left: 0; }
   #status { margin-left: auto; }
 }
+
+.rixcel-tools { padding: .7rem 1rem; border-bottom: 1px solid #cbd5e1; }
+.rixcel-tools fieldset { display: flex; flex-wrap: wrap; gap: .65rem; align-items: end; margin-top: .7rem; }
+.rixcel-tools label { display: flex; flex-direction: column; gap: .2rem; }
+.rixcel-tools input { max-width: 15rem; }
+.rixcel-tools p { flex-basis: 100%; margin: .2rem 0; }
+#tensor-host:empty { display: none; }
+
+.rixcel-tools button { border: 1px solid #c4b5fd; border-radius: 5px; padding: .35rem .6rem; color: #4c1d95; background: #fff; cursor: pointer; }
+.rixcel-tools input, .rixcel-tools select { border: 1px solid #cbd5e1; border-radius: 4px; padding: .3rem; background: #fff; color: #172033; }
+.rixcel-tools button:focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; }

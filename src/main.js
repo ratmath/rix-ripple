@@ -4,6 +4,7 @@ import {
     createRixCelDocument,
     enhanceSheetViews,
     parseRixCelDocument,
+    replayRixCelDocument,
     setRixCelCursor,
     setRixCelDraft,
     stringifyRixCelDocument,
@@ -106,6 +107,19 @@ function renderProjection(nextProjection) {
     // Preserve requested window capacity when a small document clips the projection.
     Object.assign(viewport, { rowStart: nextProjection.window.rowStart, columnStart: nextProjection.window.columnStart });
     host.innerHTML = nextProjection.html;
+    const tensorHost = document.querySelector('#tensor-host');
+    tensorHost.replaceChildren();
+    if (nextProjection.tensorHtml) { tensorHost.innerHTML = nextProjection.tensorHtml; enhanceSheetViews(tensorHost); }
+    if (nextProjection.tensorError) {
+        const diagnostic=document.createElement('p'); diagnostic.setAttribute('role','status');
+        diagnostic.textContent=`Linked tensor unavailable; showing the last valid plane: ${nextProjection.tensorError}`;
+        tensorHost.prepend(diagnostic);
+    }
+    const regions = replayRixCelDocument(documentLog).view.regions ?? {};
+    const selector = document.querySelector('#region-select'), previousRegion = selector.value;
+    selector.replaceChildren(new Option('Choose a region',''));
+    for (const regionName of Object.keys(regions)) selector.add(new Option(regionName,regionName));
+    selector.value = previousRegion;
     enhanceSheetViews(host, {
         onSelection(detail) {
             selectedIndex = [...detail.index];
@@ -295,11 +309,15 @@ async function openFile(file) {
 async function restoreCursor(cursor) {
     if (pendingCommit) throw new Error("An edit is still being saved");
     if (!documentLog || cursor < sessionFloorCursor || cursor > documentLog.events.length) return;
-    const candidate = setRixCelCursor(documentLog, cursor);
-    const result = await evaluationWorker.request({ type: workbookLog ? "commit" : "open", document: candidate, window: viewport });
-    bindProjection(result, name, { resetSession: false });
-    dirty = true;
-    setStatus(cursor < documentLog.events.length ? "Undo restored" : "Redo restored");
+    const undoing = cursor < documentLog.cursor;
+    pendingCommit = true; updateHistoryButtons(); setStatus('Restoring history…');
+    try {
+        const candidate = setRixCelCursor(documentLog, cursor);
+        const result = await evaluationWorker.request({ type: "commit", document: candidate, window: viewport });
+        bindProjection(result, name, { resetSession: false });
+        dirty = true; persistRecovery();
+        setStatus(undoing ? "Undo restored" : "Redo restored");
+    } finally { pendingCommit=false; updateHistoryButtons(); }
 }
 
 async function moveWindow(rowDelta, columnDelta) {
@@ -326,6 +344,57 @@ async function allowDocumentSwitch() {
     return true;
 }
 
+function coordinates(id, optional = false) {
+    const raw = document.querySelector(`#${id}`).value.trim();
+    if (!raw && optional) return undefined;
+    const values = raw.split(',').map(item => item.trim() === '_' ? null : Number(item.trim()));
+    if (values.some(value => value !== null && (!Number.isSafeInteger(value) || value < 1))) throw new Error('Coordinates must be positive integers separated by commas');
+    return values;
+}
+
+async function tensorAction(action) {
+    if (pendingCommit) throw new Error('An edit is still being saved');
+    pendingCommit = true; updateHistoryButtons();
+    try {
+        const options = {
+            viewAxes: coordinates('tensor-axes'), slice: coordinates('tensor-slice', true),
+            targetStart: coordinates('tensor-target'), targetAxes: coordinates('tensor-target-axes'),
+        };
+        const result = await evaluationWorker.request({type:action,source:document.querySelector('#tensor-source').value,options,window:viewport});
+        if (action === 'tensor-snapshot') {
+            documentLog = result.document; workbookLog = result.workbook ?? null; dirty = true; persistRecovery();
+        }
+        renderProjection(result);
+        setStatus(action === 'tensor-snapshot' ? 'Tensor plane saved as exact values; undo restores the previous sheet' : action === 'tensor-link' ? 'Linked read-only tensor view; updates after sheet edits' : 'Linked view closed');
+    } finally { pendingCommit=false; updateHistoryButtons(); }
+}
+
+async function regionAction(action) {
+    if (action === 'region-selection') {
+        document.querySelector('#region-start').value=selectedIndex.join(',');
+        document.querySelector('#region-end').value=selectedIndex.join(',');
+        return;
+    }
+    const start = coordinates('region-start'), end = coordinates('region-end');
+    let event;
+    if (action === 'region-format') {
+        const choice = document.querySelector('#region-style').value;
+        const styles = {bold:{bold:true},italic:{italic:true},highlight:{background:'#fff2b3'},right:{align:'right'},
+            exact:{numberFormat:'exact'},decimal:{numberFormat:'decimal',precision:Number(document.querySelector('#region-precision').value)},
+            clear:{bold:null,italic:null,background:null,color:null,align:null,numberFormat:null,precision:null}};
+        event = {type:'view:format',start,end,style:styles[choice]};
+    } else event = {type:'view:region',name:document.querySelector('#region-name').value,start:action==='region-delete'?null:start,end:action==='region-delete'?null:end};
+    renderProjection(await commitEvent(event));
+}
+
+document.querySelector('#region-select').addEventListener('change', event => {
+    const region = replayRixCelDocument(documentLog).view.regions?.[event.target.value];
+    if (!region) return;
+    document.querySelector('#region-name').value=event.target.value;
+    document.querySelector('#region-start').value=region.start.join(',');
+    document.querySelector('#region-end').value=region.end.join(',');
+});
+
 document.addEventListener("click", async (event) => {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (pendingCommit) { setStatus("An edit is still being saved"); return; }
@@ -335,7 +404,9 @@ document.addEventListener("click", async (event) => {
     }
     if (!action) return;
     try {
-        if (action === "new") {
+        if (action.startsWith("tensor-")) await tensorAction(action);
+        else if (action.startsWith("region-")) await regionAction(action);
+        else if (action === "new") {
             if (await allowDocumentSwitch()) await newDocument();
         } else if (action === "open") {
             if (await allowDocumentSwitch()) fileInput.click();

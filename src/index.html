@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="rixcel-root">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -38,6 +38,38 @@
         <span id="document-name">Untitled.rixcel</span>
         <output id="status" role="status" aria-live="polite">Ready</output>
       </section>
+      <details class="rixcel-tools">
+        <summary>Tensor planes, regions and formatting</summary>
+        <fieldset><legend>Tensor plane</legend>
+          <label>Tensor expression <input id="tensor-source" value="{:2x2: 1/3,2/3;3,4}" /></label>
+          <label>Visible axes <input id="tensor-axes" value="1,2" /></label>
+          <label>Fixed coordinates (blank for defaults) <input id="tensor-slice" placeholder="_,_,1" /></label>
+          <label>Destination start <input id="tensor-target" value="1,1" /></label>
+          <label>Destination axes <input id="tensor-target-axes" value="1,2" /></label>
+          <button type="button" data-action="tensor-snapshot">Snapshot into empty cells</button>
+          <button type="button" data-action="tensor-link">Link read-only view</button>
+          <button type="button" data-action="tensor-unlink">Close linked view</button>
+          <p>Use <code>document</code> to read the current sheet. Linked views update after edits and last for this session. Snapshots are saved as exact formula values.</p>
+        </fieldset>
+        <fieldset><legend>Named regions and block formatting</legend>
+          <label>Saved region <select id="region-select"><option value="">Choose a region</option></select></label>
+          <label>Start coordinate <input id="region-start" value="1,1" /></label>
+          <label>End coordinate <input id="region-end" value="1,1" /></label>
+          <button type="button" data-action="region-selection">Use selected cell</button>
+          <label>Region name <input id="region-name" placeholder="totals" /></label>
+          <button type="button" data-action="region-save">Save region</button>
+          <button type="button" data-action="region-delete">Remove region</button>
+          <label>Style <select id="region-style">
+            <option value="bold">Bold</option><option value="italic">Italic</option>
+            <option value="highlight">Highlight</option><option value="right">Align right</option>
+            <option value="decimal">Decimal display</option><option value="exact">Exact display</option>
+            <option value="clear">Clear formatting</option>
+          </select></label>
+          <label>Decimal places <input id="region-precision" type="number" min="0" max="20" value="6" /></label>
+          <button type="button" data-action="region-format">Apply to block</button>
+        </fieldset>
+      </details>
+      <section id="tensor-host" class="rixcel-sheet-host" aria-label="Linked read-only tensor"></section>
       <section id="sheet-host" class="rixcel-sheet-host" aria-label="RiXCel sheet"></section>
     </main>
 

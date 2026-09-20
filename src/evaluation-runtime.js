@@ -1,3 +1,6 @@
+import { createRixCelTensorSheet, materializeRixCelTensorPlane } from '../../../rix/src/runtime/rixcel-tensor.js';
+import { createRixCelWorkbookDocument } from '../../../rix/src/runtime/rixcel-workbook.js';
+import { enterEvaluationBudget } from '../../../rix/src/runtime/evaluation-budget.js';
 import { snapshotXlsxDocument } from './xlsx-snapshot.js';
 import { createRixCelWorkbookHost } from "./workbook-runtime.js";
 import { createOutputBundleHost } from "../../../rix/src/runtime/output-bundle-host.js";
@@ -85,6 +88,7 @@ export class RixCelEvaluationSession {
         this.model = null;
         this.workbook = null;
         this.workbookOptions = workbookOptions;
+        this.tensorLink = null;
     }
 
     open(value, activeDocument = null) {
@@ -142,7 +146,7 @@ export class RixCelEvaluationSession {
             this.workbook.transaction([{id:candidate.id,document:candidate}]);
             return this.selectDocument(candidate.id);
         }
-        if (!sameHistoryPrefix(this.document, candidate) || candidate.events.at(-1)?.type === "axis:insert") return this.open(candidate);
+        if (!sameHistoryPrefix(this.document, candidate) || !["slot:set","slot:batch","view:axis-label"].includes(candidate.events.at(-1)?.type)) return this.open(candidate);
         try {
             this.applyEvent(candidate.events.at(-1));
             this.document = candidate;
@@ -155,7 +159,30 @@ export class RixCelEvaluationSession {
         return this;
     }
 
-    project(requestedWindow = {}) {
+    withTensor(source, run) {
+        if (typeof source !== "string" || !source.trim() || source.length > 10000) throw new Error("Tensor expression must contain 1–10000 characters");
+        const record = this.workbook?.export() ?? createRixCelWorkbookDocument([{document:this.document}]);
+        const isolated = createRixCelWorkbookHost(record);
+        const state = createRixCelEvaluationState();
+        const blocked = state.systemContext.getAllNames().filter(name => (state.systemContext.get(name).groups ?? []).some(group => ['Async','Files','Net','Random'].includes(group)));
+        state.systemContext = state.systemContext.withhold(...blocked, 'Eval','Config','RangePolicy','RegisterMethod','Print','Debug','Dump');
+        state.context.setFresh('document', isolated.sheet(this.document.id));
+        const budget = enterEvaluationBudget(state.context, {maxSteps:100000,maxTimeMs:1000});
+        try { return run(evaluate(state, source)); }
+        finally { budget.leave(); isolated.dispose(); }
+    }
+
+    tensorHtml(source, options) {
+        return this.withTensor(source, tensor => renderOutputHtml(createRixCelTensorSheet(tensor,options), value => formatValue(value)));
+    }
+
+    materializeTensor(source, options) {
+        const candidate = this.withTensor(source, tensor => materializeRixCelTensorPlane(this.document,tensor,options));
+        this.commit(candidate.document);
+        return this;
+    }
+
+    project(requestedWindow = {}, preparedTensorHtml = null) {
         if (!this.model || !this.document) throw new Error("RiXCel worker has no open document");
         const window = windowFor(this.document.shape, requestedWindow);
         if (this.workbook) prepareWorkbookWindow(this.workbook,this.document.id,window);
@@ -166,7 +193,13 @@ export class RixCelEvaluationSession {
         })`);
         const html = renderOutputHtml(view, (value) =>
             formatValue(value, { context: this.state.context, evaluate: null }));
+        let tensorHtml = null, tensorError = null;
+        if (this.tensorLink) {
+            try { tensorHtml = preparedTensorHtml ?? this.tensorHtml(this.tensorLink.source,this.tensorLink.options); this.tensorLink.lastHtml=tensorHtml; }
+            catch (error) { tensorError = error.message; tensorHtml = this.tensorLink.lastHtml ?? null; }
+        }
         return {
+            tensorHtml, tensorError,
             document: this.document,
             ...(this.workbook ? {workbook:this.workbook.export(),activeDocument:this.document.id} : {}),
             html,
@@ -210,8 +243,20 @@ export class RixCelEvaluationSession {
     }
 
     handle(request) {
+        if (request?.type === "tensor-snapshot") {
+            this.materializeTensor(request.source,request.options ?? {});
+            return this.project(request.window);
+        }
+        if (request?.type === "tensor-link") {
+            const options = request.options ?? {};
+            const html = this.tensorHtml(request.source, options); // Validate before replacing the existing link.
+            this.tensorLink = {source:request.source,options,lastHtml:html};
+            return this.project(request.window,html);
+        }
+        if (request?.type === "tensor-unlink") { this.tensorLink=null; return this.project(request.window); }
         if (request?.type === "open") {
             this.open(request.document, request.activeDocument);
+            this.tensorLink = null;
             return this.project(request.window);
         }
         if (request?.type === "commit") {
@@ -222,11 +267,12 @@ export class RixCelEvaluationSession {
             if (!this.workbook) throw new Error("No workbook is open");
             return this.workbook.refresh(request.id).then(() => this.project(request.window));
         }
-        if (request?.type === "select-document") { this.selectDocument(request.id); return this.project(request.window); }
+        if (request?.type === "select-document") { this.selectDocument(request.id); this.tensorLink = null; return this.project(request.window); }
         if (request?.type === "dispose") { this.dispose(); return {disposed:true}; }
         if (request?.type === "project") return this.project(request.window);
         if (request?.type === "import") {
             this.import(request);
+            this.tensorLink = null;
             return this.project(request.window);
         }
         if (request?.type === "export-xlsx-snapshot") return this.exportXlsxSnapshot();
