@@ -7,12 +7,12 @@ describe("RiXCel standalone app", () => {
     test("exposes document, interchange, history, and save-before-switch controls", async () => {
         const html = await readFile(new URL("src/index.html", root), "utf8");
         for (const action of [
-            "new", "open", "save", "export-csv", "export-tsv", "undo", "redo",
+            "new", "open", "save", "export-csv", "export-tsv", "export-xlsx", "undo", "redo",
             "previous-rows", "next-rows", "previous-columns", "next-columns",
         ]) {
             expect(html).toContain(`data-action="${action}"`);
         }
-        expect(html).toContain('accept=".rixcel,.csv,.tsv');
+        expect(html).toContain('accept=".xlsx,.rixcel,.csv,.tsv');
         expect(html).toContain('id="switch-document-dialog"');
         for (const choice of ["save", "discard", "cancel"]) expect(html).toContain(`value="${choice}"`);
     });

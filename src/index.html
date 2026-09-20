@@ -16,6 +16,7 @@
         <button type="button" data-action="save">Save .rixcel</button>
         <button type="button" data-action="export-csv">Export CSV</button>
         <button type="button" data-action="export-tsv">Export TSV</button>
+        <button type="button" data-action="export-xlsx">Export XLSX values</button>
       </nav>
     </header>
 
@@ -40,7 +41,7 @@
       <section id="sheet-host" class="rixcel-sheet-host" aria-label="RiXCel sheet"></section>
     </main>
 
-    <input id="file-input" type="file" accept=".rixcel,.csv,.tsv,.rixbook,application/json,text/csv,text/tab-separated-values" hidden />
+    <input id="file-input" type="file" accept=".xlsx,.rixcel,.csv,.tsv,.rixbook,application/json,text/csv,text/tab-separated-values" hidden />
     <dialog id="switch-document-dialog">
       <form method="dialog">
         <h2>Save this document?</h2>

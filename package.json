@@ -6,6 +6,12 @@
   "scripts": {
     "build": "bun scripts/build.js",
     "test": "bun test",
-    "test:browser": "bun scripts/check-browser.js"
+    "test:browser": "bun scripts/check-browser.js",
+    "test:xlsx-browser": "bun scripts/check-xlsx-browser.js"
+  },
+  "dependencies": {
+    "@protobi/exceljs": "4.4.0-protobi.10",
+    "fflate": "0.8.2",
+    "saxes": "6.0.0"
   }
 }

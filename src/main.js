@@ -263,7 +263,25 @@ async function exportDelimited(kind) {
     setStatus(`Exported ${kind.toUpperCase()}`);
 }
 
+async function exportWorkbookXlsx() {
+    const { exportXlsx } = await import('./xlsx-interchange.js');
+    const snapshot = await evaluationWorker.request({ type: 'export-xlsx-snapshot' });
+    const result = await exportXlsx(snapshot);
+    download(result.bytes, `${name.replace(/\.[^.]+$/u, '')}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    setStatus(`Exported XLSX values. ${result.diagnostics.join(' ')}`);
+}
+
 async function openFile(file) {
+    if (/\.xlsx$/iu.test(file.name)) {
+        const { importXlsx, XLSX_LIMITS } = await import('./xlsx-interchange.js');
+        if (file.size > XLSX_LIMITS.bytes) throw new Error('XLSX exceeds file size limit');
+        const result = await importXlsx(await file.arrayBuffer(), { filename: file.name });
+        Object.assign(viewport, { rowStart: 1, columnStart: 1 });
+        await loadDocument(result.document, `${file.name.replace(/\.xlsx$/iu, '')}.rixbook`);
+        dirty = false; persistRecovery();
+        setStatus(`Opened ${file.name}. ${result.diagnostics.join(' ')}`);
+        return;
+    }
     const text = await file.text();
     const extension = file.name.split(".").at(-1)?.toLowerCase();
     const kind = ["rixcel","rixbook"].includes(extension) ? "rixcel" : extension === "tsv" ? "tsv" : "csv";
@@ -323,6 +341,7 @@ document.addEventListener("click", async (event) => {
             if (await allowDocumentSwitch()) fileInput.click();
         } else if (action === "save") saveDocument();
         else if (action === "export-csv") await exportDelimited("csv");
+        else if (action === "export-xlsx") await exportWorkbookXlsx();
         else if (action === "export-tsv") await exportDelimited("tsv");
         else if (action === "undo") await restoreCursor(documentLog.cursor - 1);
         else if (action === "redo") await restoreCursor(documentLog.cursor + 1);

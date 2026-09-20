@@ -1,3 +1,4 @@
+import { snapshotXlsxDocument } from './xlsx-snapshot.js';
 import { createRixCelWorkbookHost } from "./workbook-runtime.js";
 import { createOutputBundleHost } from "../../../rix/src/runtime/output-bundle-host.js";
 import {
@@ -196,6 +197,18 @@ export class RixCelEvaluationSession {
         return evaluate(this.state, `${fn}(document)`).value;
     }
 
+    exportXlsxSnapshot() {
+        if (!this.model) throw new Error("No document is open");
+        const documents=this.workbook ? this.workbook.export().documents.map(record=>record.document) : [this.document];
+        const sheets=[];let count=0;
+        for(const document of documents) {
+            const model=this.workbook ? this.workbook.sheet(document.id) : this.model;
+            const sheet=snapshotXlsxDocument(document,model,{maxCells:4096-count,prepare:indices=>this.workbook?.materialize(document.id,indices),format:value=>formatValue(value,{context:this.state.context,evaluate:null})});
+            count+=sheet.cells.length;sheets.push(sheet);
+        }
+        return {sheets};
+    }
+
     handle(request) {
         if (request?.type === "open") {
             this.open(request.document, request.activeDocument);
@@ -216,6 +229,7 @@ export class RixCelEvaluationSession {
             this.import(request);
             return this.project(request.window);
         }
+        if (request?.type === "export-xlsx-snapshot") return this.exportXlsxSnapshot();
         if (request?.type === "export") return { text: this.exportDelimited(request.kind) };
         if (request?.type === "validate") {
             const isolated = new RixCelEvaluationSession();
