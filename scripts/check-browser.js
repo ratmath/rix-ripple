@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {mkdir,readFile} from 'node:fs/promises';
-import {createRixCelDocument,appendRixCelEvent,stringifyRixCelDocument} from '../../../rix/src/index.js';
+import {createRixCelDocument,appendRixCelEvent,stringifyRixCelDocument,createRixCelWorkbookDocument} from '../../../rix/src/index.js';
 const output=path.resolve(import.meta.dir,'../../../tmp/c1-browser');await mkdir(output,{recursive:true});
 const root=path.join(output,'site');
 const build=Bun.spawn(['bun',path.resolve(import.meta.dir,'build.js')],{env:{...process.env,RIXCEL_BUILD_DIR:root},stdout:'inherit',stderr:'inherit'});
@@ -15,8 +15,8 @@ try{
  const page=await context.newPage();page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',dialog=>dialog.accept());
  const cell=(row,col)=>page.locator(`td[data-rix-address="grid[${row},${col}]"]`);
  const action=name=>page.locator(`[data-action="${name}"]`);
- const history=()=>page.evaluate(()=>JSON.parse(JSON.parse(localStorage.getItem('rixcel.autosave.v2')).document));
- async function settled(cursor){console.log('Waiting for event',cursor);try{await page.waitForFunction(n=>{try{return JSON.parse(JSON.parse(localStorage.getItem('rixcel.autosave.v2')).document).cursor===n}catch{return false}},cursor);await page.waitForTimeout(60);}catch(error){console.log(await page.locator('body').innerText());console.log(await history());throw error;}}
+ const history=()=>page.evaluate(()=>{const saved=JSON.parse(localStorage.getItem('rixcel.autosave.v2'));const doc=JSON.parse(saved.document);return doc.format==='rixcel-workbook'?doc.documents.find(r=>r.document.id===saved.activeDocument).document:doc;});
+ async function settled(cursor){console.log('Waiting for event',cursor);try{await page.waitForFunction(n=>{try{return (()=>{const saved=JSON.parse(localStorage.getItem('rixcel.autosave.v2'));const doc=JSON.parse(saved.document);return (doc.format==='rixcel-workbook'?doc.documents.find(r=>r.document.id===saved.activeDocument).document:doc).cursor===n;})()}catch{return false}},cursor);await page.waitForTimeout(60);}catch(error){console.log(await page.locator('body').innerText());console.log(await history());throw error;}}
  async function edit(row,col,source){const before=(await history()).cursor;await cell(row,col).click();await page.locator('[data-rix-edit-source]').fill(source);await page.locator('[data-rix-edit-source]').press('Enter');await settled(before+1);}
  await page.goto(`http://127.0.0.1:${server.port}/`);await cell(1,1).waitFor();
  await edit(1,1,'2/3');await edit(2,2,'grid[1,1]*3');assert.equal((await cell(2,2).innerText()).trim(),'2');
@@ -40,6 +40,19 @@ try{
  // Open a large sparse sheet and navigate without a dense DOM/model.
  let huge=createRixCelDocument({id:'large',shape:[10000,10000]});huge=appendRixCelEvent(huge,{type:'slot:set',index:[41,13],source:'11/13'});
  const hugePath=path.join(output,'large.rixcel');await Bun.write(hugePath,stringifyRixCelDocument(huge));await page.locator('#file-input').setInputFiles(hugePath);await settled(1);await action('next-rows').click();await page.waitForFunction(()=>document.querySelector('#window-status')?.textContent.includes('Rows 41'));await action('next-columns').click();await cell(41,13).waitFor();assert.equal((await cell(41,13).innerText()).trim(),'11/13');assert.ok(await page.locator('td[data-rix-address]').count()<=480);
+ // Workbook documents share committed exports while retaining separate histories.
+ const sales=appendRixCelEvent(createRixCelDocument({id:'sales',shape:[2,2]}),{type:'slot:set',index:[1,1],source:'2/3'});
+ const report=appendRixCelEvent(createRixCelDocument({id:'report',shape:[2,2]}),{type:'slot:set',index:[1,1],source:'imports.Get(:subtotal)*3'});
+ const workbook=createRixCelWorkbookDocument([{document:sales,exports:{subtotal:{index:[1,1]}}},{document:report,imports:{subtotal:{document:'sales',export:'subtotal'}},exports:{total:{index:[1,1]}}}]);
+ const bookPath=path.join(output,'cross-sheet.rixbook');await Bun.write(bookPath,JSON.stringify(workbook));await page.locator('#file-input').setInputFiles(bookPath);await page.locator('#workbook-document').waitFor({state:'visible'});
+ await page.locator('#workbook-document').selectOption('report');await page.waitForFunction(()=>document.querySelector('td[data-rix-address="grid[1,1]"]')?.textContent==='2');
+ await page.locator('#workbook-document').selectOption('sales');await page.waitForFunction(()=>document.querySelector('td[data-rix-address="grid[1,1]"]')?.textContent==='2/3');await edit(1,1,'5/7');
+ await page.locator('#workbook-document').selectOption('report');await page.waitForFunction(()=>document.querySelector('td[data-rix-address="grid[1,1]"]')?.textContent==='2..1/7');
+ const bookDownload=page.waitForEvent('download');await action('save').click();const bookSaved=path.join(output,'saved.rixbook');await (await bookDownload).saveAs(bookSaved);assert.equal(JSON.parse(await readFile(bookSaved,'utf8')).documents.length,2);
+ await page.reload();await page.locator('#workbook-document').waitFor({state:'visible'});assert.equal(await page.locator('#workbook-document').inputValue(),'report');assert.equal((await cell(1,1).innerText()).trim(),'2..1/7');
+ await page.locator('#workbook-document').selectOption('sales');await page.waitForFunction(()=>document.querySelector('td[data-rix-address="grid[1,1]"]')?.textContent==='5/7');await action('undo').click();await settled(1);
+ await page.locator('#workbook-document').selectOption('report');await page.waitForFunction(()=>document.querySelector('td[data-rix-address="grid[1,1]"]')?.textContent==='2');
+ console.log('C2 browser acceptance passed: workbook open, document selection, exact cross-sheet recomputation, save/restart and cross-sheet undo.');
  assert.deepEqual(errors,[]);await page.screenshot({path:path.join(output,'verified.png')});
  console.log('C1 browser acceptance passed: exact editing, row/column insertion, fill/copy, draft recovery, save/reopen/restart, persistent undo/redo, bounded sparse navigation.');
 }finally{await context?.close();server.stop(true);}

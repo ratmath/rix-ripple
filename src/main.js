@@ -7,6 +7,7 @@ import {
     setRixCelCursor,
     setRixCelDraft,
     stringifyRixCelDocument,
+    stringifyRixCelWorkbook,
 } from "../../../rix/src/index.js";
 import { RixCelWorkerClient } from "./evaluation-worker-client.js";
 
@@ -28,6 +29,8 @@ const windowStatus = document.querySelector("#window-status");
 const switchDialog = document.querySelector("#switch-document-dialog");
 
 let documentLog = null;
+let workbookLog = null;
+const documentSelector = document.querySelector("#workbook-document");
 let projection = null;
 let name = "Untitled.rixcel";
 let dirty = false;
@@ -56,12 +59,18 @@ function updateWindowControls() {
     windowStatus.textContent = `Rows ${rowStart}–${rowStart + rowCount - 1} of ${rowTotal} · Columns ${columnStart}–${columnStart + columnCount - 1} of ${columnTotal}`;
 }
 
+function savedDocument() {
+    return workbookLog ? { ...workbookLog, documents: workbookLog.documents.map(record => record.document.id === documentLog.id ? { ...record, document: documentLog } : record) } : documentLog;
+}
+function savedText() { return workbookLog ? stringifyRixCelWorkbook(savedDocument()) : stringifyRixCelDocument(documentLog); }
+
 function persistRecovery() {
     if (!documentLog) return;
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
             name,
-            document: stringifyRixCelDocument(documentLog),
+            document: savedText(),
+            activeDocument: documentLog.id,
             dirty,
         }));
     } catch (error) {
@@ -173,6 +182,7 @@ async function commitEvent(event) {
     const candidate = appendRixCelEvent(next, event);
     const result = await evaluationWorker.request({ type: "commit", document: candidate, window: viewport });
     documentLog = candidate;
+    workbookLog = result.workbook ?? null;
     dirty = true;
     persistRecovery();
     setStatus(event.type === "slot:batch"
@@ -191,6 +201,13 @@ async function insertAxis(axis) {
 
 function bindProjection(result, nextName, { resetSession = true } = {}) {
     documentLog = parseRixCelDocument(result.document);
+    workbookLog = result.workbook ?? null;
+    documentSelector.replaceChildren();
+    documentSelector.hidden = !workbookLog;
+    for (const record of workbookLog?.documents ?? []) {
+        const option = document.createElement("option"); option.value=record.document.id; option.textContent=record.document.id;
+        option.selected=record.document.id===documentLog.id; documentSelector.append(option);
+    }
     name = nextName || "Untitled.rixcel";
     documentName.textContent = name;
     if (resetSession) sessionFloorCursor = 0; // Saved history remains undoable after restart/open.
@@ -199,8 +216,7 @@ function bindProjection(result, nextName, { resetSession = true } = {}) {
 }
 
 async function loadDocument(document, nextName, options = {}) {
-    const canonical = parseRixCelDocument(document);
-    const result = await evaluationWorker.request({ type: "open", document: canonical, window: viewport });
+    const result = await evaluationWorker.request({ type: "open", document, activeDocument:options.activeDocument, window: viewport });
     bindProjection(result, nextName, options);
 }
 
@@ -234,7 +250,7 @@ function download(text, filename, type) {
 }
 
 function saveDocument() {
-    download(stringifyRixCelDocument(documentLog), name, "application/json");
+    download(savedText(), name, "application/json");
     dirty = false;
     persistRecovery();
     setStatus(`Saved document with ${documentLog.events.length} history events`);
@@ -250,7 +266,7 @@ async function exportDelimited(kind) {
 async function openFile(file) {
     const text = await file.text();
     const extension = file.name.split(".").at(-1)?.toLowerCase();
-    const kind = extension === "rixcel" ? "rixcel" : extension === "tsv" ? "tsv" : "csv";
+    const kind = ["rixcel","rixbook"].includes(extension) ? "rixcel" : extension === "tsv" ? "tsv" : "csv";
     Object.assign(viewport, { rowStart: 1, columnStart: 1 });
     await importText(text, kind, kind === "rixcel" ? file.name : `${file.name.replace(/\.[^.]+$/u, "")}.rixcel`);
     dirty = false;
@@ -262,7 +278,7 @@ async function restoreCursor(cursor) {
     if (pendingCommit) throw new Error("An edit is still being saved");
     if (!documentLog || cursor < sessionFloorCursor || cursor > documentLog.events.length) return;
     const candidate = setRixCelCursor(documentLog, cursor);
-    const result = await evaluationWorker.request({ type: "open", document: candidate, window: viewport });
+    const result = await evaluationWorker.request({ type: workbookLog ? "commit" : "open", document: candidate, window: viewport });
     bindProjection(result, name, { resetSession: false });
     dirty = true;
     setStatus(cursor < documentLog.events.length ? "Undo restored" : "Redo restored");
@@ -330,6 +346,14 @@ fileInput.addEventListener("change", async () => {
     }
 });
 
+documentSelector.addEventListener("change", async () => {
+    if (pendingCommit) { documentSelector.value=documentLog.id; return; }
+    // Keep failed source visible until corrected; it is not an executable workbook update.
+    if (documentLog.drafts.length) { documentSelector.value=documentLog.id; setStatus("Resolve formula drafts before switching documents"); return; }
+    try { const result=await evaluationWorker.request({type:"select-document",id:documentSelector.value,window:{...viewport,rowStart:1,columnStart:1}});bindProjection(result,name); }
+    catch(error){documentSelector.value=documentLog.id;setStatus(error.message);}
+});
+
 window.addEventListener("beforeunload", (event) => {
     if (!dirty) return;
     event.preventDefault();
@@ -344,7 +368,7 @@ try {
         || "null",
     );
     if (saved?.document) {
-        await loadDocument(saved.document, saved.name);
+        await loadDocument(saved.document, saved.name, {activeDocument:saved.activeDocument});
         dirty = saved.dirty ?? true;
         persistRecovery();
         setStatus("Recovered local document");

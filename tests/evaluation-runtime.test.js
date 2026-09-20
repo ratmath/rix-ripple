@@ -91,3 +91,17 @@ test('structural worker replacement is atomic and parse failures retain a usable
     expect(session.model.shape).toEqual(valid.shape);
     expect(session.project().html).toContain('5/7');
 });
+
+test('worker workbook selection and cross-document undo preserve owned exports',()=>{
+    const first=appendRixCelEvent(createRixCelDocument({id:'input',shape:[2,2]}),{type:'slot:set',index:[1,1],source:'2/3'});
+    const second=appendRixCelEvent(createRixCelDocument({id:'output',shape:[2,2]}),{type:'slot:set',index:[1,1],source:'book.Get(:input,:value)*3'});
+    const workbook={format:'rixcel-workbook',version:1,documents:[{document:first,exports:{value:{index:[1,1]}}},{document:second,exports:{value:{index:[1,1]}}}]};
+    const session=new RixCelEvaluationSession();const initial=session.handle({type:'open',document:workbook,activeDocument:'output'});
+    expect(initial.html).toContain('>2</td>');expect(initial.workbook.documents).toHaveLength(2);
+    session.handle({type:'select-document',id:'input'});
+    session.handle({type:'commit',document:appendRixCelEvent(first,{type:'slot:set',index:[1,1],source:'7/3'})});
+    expect(session.handle({type:'select-document',id:'output'}).html).toContain('>7</td>');
+    session.handle({type:'select-document',id:'input'});session.handle({type:'commit',document:first});
+    expect(session.handle({type:'select-document',id:'output'}).html).toContain('>2</td>');
+    const old=session.workbook;session.open(first);expect(old.disposed).toBe(true);session.dispose();
+});

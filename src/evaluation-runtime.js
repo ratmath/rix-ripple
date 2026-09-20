@@ -1,3 +1,4 @@
+import { createRixCelWorkbookHost } from "./workbook-runtime.js";
 import { createOutputBundleHost } from "../../../rix/src/runtime/output-bundle-host.js";
 import {
     Context,
@@ -63,26 +64,63 @@ function windowFor(shape, requested = {}) {
     };
 }
 
+function prepareWorkbookWindow(workbook,id,window) {
+    const model=workbook.sheet(id),indices=[];
+    for(let row=window.rowStart;row<window.rowStart+window.rowCount;row++) {
+        for(let col=window.columnStart;col<window.columnStart+window.columnCount;col++) {
+            const index=model.shape.map((_,axis)=>model.documentView.slice?.[axis]??1);
+            index[0]=row;if(index.length>1)index[1]=col;indices.push(index);
+        }
+    }
+    workbook.materialize(id,indices);
+}
+
 /** Persistent, worker-owned FormulaSheet session and visible-plane projector. */
 export class RixCelEvaluationSession {
-    constructor({ assetStore, authorizeExternal = null } = {}) {
+    constructor({ assetStore, authorizeExternal = null, workbookOptions = {} } = {}) {
         Object.assign(this, createOutputBundleHost({ assetStore, authorizeExternal, format: (value) => formatValue(value, { context: this.state.context, evaluate: null }) }));
         this.state = createRixCelEvaluationState();
         this.document = null;
         this.model = null;
+        this.workbook = null;
+        this.workbookOptions = workbookOptions;
     }
 
-    open(value) {
+    open(value, activeDocument = null) {
+        const input = typeof value === "string" ? JSON.parse(value) : value;
+        if (input?.format === "rixcel-workbook") {
+            const candidate = createRixCelWorkbookHost(input, { ...this.workbookOptions, withheld: RIXCEL_WITHHELD_CAPABILITIES });
+            const id = activeDocument ?? candidate.export().documents[0].document.id;
+            try { const model=candidate.sheet(id); prepareWorkbookWindow(candidate,id,windowFor(model.shape)); } catch (error) { candidate.dispose(); throw error; }
+            const previous = this.workbook;
+            this.workbook = candidate;
+            this.selectDocument(id);
+            previous?.dispose();
+            return this;
+        }
         const document = parseRixCelDocument(value);
         const nextState = createRixCelEvaluationState();
         setText(nextState.context, "hosttext", JSON.stringify(document));
         const model = evaluate(nextState, ".RiXCelImport(hosttext)");
         nextState.context.setFresh("document", model);
+        this.workbook?.dispose();
+        this.workbook = null;
         this.state = nextState;
         this.document = document;
         this.model = model;
         return this;
     }
+
+    selectDocument(id) {
+        if (!this.workbook) throw new Error("No workbook is open");
+        const model = this.workbook.sheet(id);
+        this.document = this.workbook.export().documents.find(record => record.document.id === id).document;
+        this.model = model;
+        this.state.context.setFresh("document", model);
+        return this;
+    }
+
+    dispose() { this.workbook?.dispose(); this.workbook=null; this.document=null; this.model=null; }
 
     applyEvent(event) {
         if (event.type === "slot:set") {
@@ -98,6 +136,11 @@ export class RixCelEvaluationSession {
 
     commit(value) {
         const candidate = parseRixCelDocument(value);
+        if (this.workbook) {
+            if (candidate.id !== this.document.id) throw new Error("Edit must target the selected document");
+            this.workbook.transaction([{id:candidate.id,document:candidate}]);
+            return this.selectDocument(candidate.id);
+        }
         if (!sameHistoryPrefix(this.document, candidate) || candidate.events.at(-1)?.type === "axis:insert") return this.open(candidate);
         try {
             this.applyEvent(candidate.events.at(-1));
@@ -114,6 +157,7 @@ export class RixCelEvaluationSession {
     project(requestedWindow = {}) {
         if (!this.model || !this.document) throw new Error("RiXCel worker has no open document");
         const window = windowFor(this.document.shape, requestedWindow);
+        if (this.workbook) prepareWorkbookWindow(this.workbook,this.document.id,window);
         const view = evaluate(this.state, `.Sheet(document, {=
             title="RiXCel document",
             rowStart=${window.rowStart}, rowCount=${window.rowCount},
@@ -123,6 +167,7 @@ export class RixCelEvaluationSession {
             formatValue(value, { context: this.state.context, evaluate: null }));
         return {
             document: this.document,
+            ...(this.workbook ? {workbook:this.workbook.export(),activeDocument:this.document.id} : {}),
             html,
             epoch: this.model.epoch,
             shape: [...this.document.shape],
@@ -133,7 +178,7 @@ export class RixCelEvaluationSession {
 
     import(request) {
         const kind = request.kind === "tsv" ? "tsv" : request.kind === "csv" ? "csv" : "rixcel";
-        if (kind === "rixcel") return this.open(parseRixCelDocument(request.text));
+        if (kind === "rixcel") return this.open(request.text, request.activeDocument);
         const importState = createRixCelEvaluationState();
         setText(importState.context, "hosttext", request.text);
         setText(importState.context, "hostid", request.id || "imported");
@@ -153,13 +198,19 @@ export class RixCelEvaluationSession {
 
     handle(request) {
         if (request?.type === "open") {
-            this.open(request.document);
+            this.open(request.document, request.activeDocument);
             return this.project(request.window);
         }
         if (request?.type === "commit") {
             this.commit(request.document);
             return this.project(request.window);
         }
+        if (request?.type === "refresh-external") {
+            if (!this.workbook) throw new Error("No workbook is open");
+            return this.workbook.refresh(request.id).then(() => this.project(request.window));
+        }
+        if (request?.type === "select-document") { this.selectDocument(request.id); return this.project(request.window); }
+        if (request?.type === "dispose") { this.dispose(); return {disposed:true}; }
         if (request?.type === "project") return this.project(request.window);
         if (request?.type === "import") {
             this.import(request);
@@ -169,7 +220,9 @@ export class RixCelEvaluationSession {
         if (request?.type === "validate") {
             const isolated = new RixCelEvaluationSession();
             isolated.open(request.document);
-            return { document: isolated.document };
+            const result = { document: isolated.document, ...(isolated.workbook ? {workbook:isolated.workbook.export()} : {}) };
+            isolated.dispose();
+            return result;
         }
         throw new Error(`Unknown RiXCel worker request: ${request?.type || "missing type"}`);
     }

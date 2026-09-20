@@ -2,10 +2,10 @@ import { RixCelEvaluationSession } from "./evaluation-runtime.js";
 
 const session = new RixCelEvaluationSession();
 
-self.addEventListener("message", (event) => {
+self.addEventListener("message", async (event) => {
     const { id, request } = event.data || {};
     try {
-        self.postMessage({ id, type: "result", value: session.handle(request) });
+        self.postMessage({ id, type: "result", value: await session.handle(request) });
     } catch (error) {
         self.postMessage({
             id,

@@ -49,3 +49,18 @@ large sparse navigation. It uses a host-installed `playwright`; optional
 `RIX_PLAYWRIGHT_MODULE` and `RIX_CHROME_EXECUTABLE` point to existing installations.
 Artifacts stay under the umbrella repository's `tmp/c1-browser/`. Normal builds
 still use `docs/`; `RIXCEL_BUILD_DIR` selects an isolated build directory.
+
+## Workbooks
+
+Open a `.rixbook` file to use named exports across documents. The toolbar selector
+switches documents; editing or undoing an input recomputes dependent outputs
+atomically. Saving and local recovery retain every document and its configuration.
+Try [cross-sheet.rixbook](../../rix/examples/rixcel/cross-sheet.rixbook).
+
+See the [workbook guide](../../rix/documentation/eval/workbooks.md) for explicit
+`book`, `names`, `imports`, exact external snapshots, bounded manual refresh,
+host-only scheduling and disposal. No external provider is installed by opening
+a file. `createRixCelWorkbookHost` supplies the isolated evaluator for embeddings;
+the ordinary worker supports workbook open/select/commit and keeps formula
+execution out of the UI thread. Browser acceptance includes cross-sheet edits,
+persistent workbook selection, save/restart and undo.
