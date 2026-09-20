@@ -1,13 +1,18 @@
 import {
+  enhanceSheetViews
+} from "./chunk-prx8fx2k.js";
+import {
+  __require,
   appendRixCelEvent,
   clearRixCelDraft,
   createRixCelDocument,
-  enhanceSheetViews,
   parseRixCelDocument,
+  replayRixCelDocument,
   setRixCelCursor,
   setRixCelDraft,
-  stringifyRixCelDocument
-} from "./chunk-a86m3sxx.js";
+  stringifyRixCelDocument,
+  stringifyRixCelWorkbook
+} from "./chunk-n5a1tte6.js";
 
 // src/evaluation-worker-client.js
 var DEFAULT_TIMEOUT_MS = 2000;
@@ -102,17 +107,21 @@ var nextColumnsButton = document.querySelector('[data-action="next-columns"]');
 var windowStatus = document.querySelector("#window-status");
 var switchDialog = document.querySelector("#switch-document-dialog");
 var documentLog = null;
+var workbookLog = null;
+var documentSelector = document.querySelector("#workbook-document");
 var projection = null;
 var name = "Untitled.rixcel";
 var dirty = false;
 var sessionFloorCursor = 0;
+var selectedIndex = [1, 1];
+var pendingCommit = false;
 var viewport = { rowStart: 1, rowCount: 40, columnStart: 1, columnCount: 12 };
 function setStatus(message) {
   status.textContent = message;
 }
 function updateHistoryButtons() {
-  undoButton.disabled = !documentLog || documentLog.cursor <= sessionFloorCursor;
-  redoButton.disabled = !documentLog || documentLog.cursor >= documentLog.events.length;
+  undoButton.disabled = pendingCommit || !documentLog || documentLog.cursor <= sessionFloorCursor;
+  redoButton.disabled = pendingCommit || !documentLog || documentLog.cursor >= documentLog.events.length;
 }
 function updateWindowControls() {
   if (!projection)
@@ -125,13 +134,20 @@ function updateWindowControls() {
   nextColumnsButton.disabled = columnStart + columnCount > columnTotal;
   windowStatus.textContent = `Rows ${rowStart}–${rowStart + rowCount - 1} of ${rowTotal} · Columns ${columnStart}–${columnStart + columnCount - 1} of ${columnTotal}`;
 }
+function savedDocument() {
+  return workbookLog ? { ...workbookLog, documents: workbookLog.documents.map((record) => record.document.id === documentLog.id ? { ...record, document: documentLog } : record) } : documentLog;
+}
+function savedText() {
+  return workbookLog ? stringifyRixCelWorkbook(savedDocument()) : stringifyRixCelDocument(documentLog);
+}
 function persistRecovery() {
   if (!documentLog)
     return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       name,
-      document: stringifyRixCelDocument(documentLog),
+      document: savedText(),
+      activeDocument: documentLog.id,
       dirty
     }));
   } catch (error) {
@@ -157,10 +173,29 @@ function errorKind(message) {
 }
 function renderProjection(nextProjection) {
   projection = nextProjection;
-  Object.assign(viewport, nextProjection.window);
+  Object.assign(viewport, { rowStart: nextProjection.window.rowStart, columnStart: nextProjection.window.columnStart });
   host.innerHTML = nextProjection.html;
+  const tensorHost = document.querySelector("#tensor-host");
+  tensorHost.replaceChildren();
+  if (nextProjection.tensorHtml) {
+    tensorHost.innerHTML = nextProjection.tensorHtml;
+    enhanceSheetViews(tensorHost);
+  }
+  if (nextProjection.tensorError) {
+    const diagnostic = document.createElement("p");
+    diagnostic.setAttribute("role", "status");
+    diagnostic.textContent = `Linked tensor unavailable; showing the last valid plane: ${nextProjection.tensorError}`;
+    tensorHost.prepend(diagnostic);
+  }
+  const regions = replayRixCelDocument(documentLog).view.regions ?? {};
+  const selector = document.querySelector("#region-select"), previousRegion = selector.value;
+  selector.replaceChildren(new Option("Choose a region", ""));
+  for (const regionName of Object.keys(regions))
+    selector.add(new Option(regionName, regionName));
+  selector.value = previousRegion;
   enhanceSheetViews(host, {
     onSelection(detail) {
+      selectedIndex = [...detail.index];
       setStatus(detail.coordinateLabel || detail.address);
     },
     async onEdit(detail) {
@@ -223,30 +258,55 @@ function renderProjection(nextProjection) {
   updateWindowControls();
 }
 async function commitEvent(event) {
-  let next = documentLog;
-  const edits = event.type === "slot:batch" ? event.edits : event.type === "slot:set" ? [event] : [];
-  for (const edit of edits)
-    next = clearRixCelDraft(next, edit.index);
-  const candidate = appendRixCelEvent(next, event);
-  const result = await evaluationWorker.request({ type: "commit", document: candidate, window: viewport });
-  documentLog = candidate;
-  dirty = true;
-  persistRecovery();
-  setStatus(event.type === "slot:batch" ? `Saved ${event.edits.length} cells locally · event ${documentLog.cursor} · epoch ${result.epoch}` : `Saved locally · event ${documentLog.cursor} · epoch ${result.epoch}`);
-  return result;
+  if (pendingCommit)
+    throw new Error("An edit is still being saved; try again when it finishes");
+  pendingCommit = true;
+  updateHistoryButtons();
+  try {
+    let next = documentLog;
+    const edits = event.type === "slot:batch" ? event.edits : event.type === "slot:set" ? [event] : [];
+    for (const edit of edits)
+      next = clearRixCelDraft(next, edit.index);
+    const candidate = appendRixCelEvent(next, event);
+    const result = await evaluationWorker.request({ type: "commit", document: candidate, window: viewport });
+    documentLog = candidate;
+    workbookLog = result.workbook ?? null;
+    dirty = true;
+    persistRecovery();
+    setStatus(event.type === "slot:batch" ? `Saved ${event.edits.length} cells locally · event ${documentLog.cursor} · epoch ${result.epoch}` : `Saved locally · event ${documentLog.cursor} · epoch ${result.epoch}`);
+    return result;
+  } finally {
+    pendingCommit = false;
+    updateHistoryButtons();
+  }
+}
+async function insertAxis(axis) {
+  const coordinate = Math.min(selectedIndex[axis - 1] || 1, documentLog.shape[axis - 1]);
+  const result = await commitEvent({ type: "axis:insert", axis, coordinate, count: 1 });
+  renderProjection(result);
+  setStatus(`Inserted ${axis === 1 ? "row" : "column"} ${coordinate}; references updated`);
 }
 function bindProjection(result, nextName, { resetSession = true } = {}) {
   documentLog = parseRixCelDocument(result.document);
+  workbookLog = result.workbook ?? null;
+  documentSelector.replaceChildren();
+  documentSelector.hidden = !workbookLog;
+  for (const record of workbookLog?.documents ?? []) {
+    const option = document.createElement("option");
+    option.value = record.document.id;
+    option.textContent = record.document.id;
+    option.selected = record.document.id === documentLog.id;
+    documentSelector.append(option);
+  }
   name = nextName || "Untitled.rixcel";
   documentName.textContent = name;
   if (resetSession)
-    sessionFloorCursor = documentLog.cursor;
+    sessionFloorCursor = 0;
   renderProjection(result);
   persistRecovery();
 }
 async function loadDocument(document2, nextName, options = {}) {
-  const canonical = parseRixCelDocument(document2);
-  const result = await evaluationWorker.request({ type: "open", document: canonical, window: viewport });
+  const result = await evaluationWorker.request({ type: "open", document: document2, activeDocument: options.activeDocument, window: viewport });
   bindProjection(result, nextName, options);
 }
 async function importText(text, kind, nextName) {
@@ -276,7 +336,7 @@ function download(text, filename, type) {
   URL.revokeObjectURL(url);
 }
 function saveDocument() {
-  download(stringifyRixCelDocument(documentLog), name, "application/json");
+  download(savedText(), name, "application/json");
   dirty = false;
   persistRecovery();
   setStatus(`Saved document with ${documentLog.events.length} history events`);
@@ -287,10 +347,29 @@ async function exportDelimited(kind) {
   download(result.text, `${base}.${kind}`, kind === "csv" ? "text/csv" : "text/tab-separated-values");
   setStatus(`Exported ${kind.toUpperCase()}`);
 }
+async function exportWorkbookXlsx() {
+  const { exportXlsx } = await import("./chunk-94g4480y.js");
+  const snapshot = await evaluationWorker.request({ type: "export-xlsx-snapshot" });
+  const result = await exportXlsx(snapshot);
+  download(result.bytes, `${name.replace(/\.[^.]+$/u, "")}.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  setStatus(`Exported XLSX values. ${result.diagnostics.join(" ")}`);
+}
 async function openFile(file) {
+  if (/\.xlsx$/iu.test(file.name)) {
+    const { importXlsx, XLSX_LIMITS } = await import("./chunk-94g4480y.js");
+    if (file.size > XLSX_LIMITS.bytes)
+      throw new Error("XLSX exceeds file size limit");
+    const result = await importXlsx(await file.arrayBuffer(), { filename: file.name });
+    Object.assign(viewport, { rowStart: 1, columnStart: 1 });
+    await loadDocument(result.document, `${file.name.replace(/\.xlsx$/iu, "")}.rixbook`);
+    dirty = false;
+    persistRecovery();
+    setStatus(`Opened ${file.name}. ${result.diagnostics.join(" ")}`);
+    return;
+  }
   const text = await file.text();
   const extension = file.name.split(".").at(-1)?.toLowerCase();
-  const kind = extension === "rixcel" ? "rixcel" : extension === "tsv" ? "tsv" : "csv";
+  const kind = ["rixcel", "rixbook"].includes(extension) ? "rixcel" : extension === "tsv" ? "tsv" : "csv";
   Object.assign(viewport, { rowStart: 1, columnStart: 1 });
   await importText(text, kind, kind === "rixcel" ? file.name : `${file.name.replace(/\.[^.]+$/u, "")}.rixcel`);
   dirty = false;
@@ -298,13 +377,25 @@ async function openFile(file) {
   setStatus(`Opened ${file.name}`);
 }
 async function restoreCursor(cursor) {
+  if (pendingCommit)
+    throw new Error("An edit is still being saved");
   if (!documentLog || cursor < sessionFloorCursor || cursor > documentLog.events.length)
     return;
-  const candidate = setRixCelCursor(documentLog, cursor);
-  const result = await evaluationWorker.request({ type: "open", document: candidate, window: viewport });
-  bindProjection(result, name, { resetSession: false });
-  dirty = true;
-  setStatus(cursor < documentLog.events.length ? "Undo restored" : "Redo restored");
+  const undoing = cursor < documentLog.cursor;
+  pendingCommit = true;
+  updateHistoryButtons();
+  setStatus("Restoring history…");
+  try {
+    const candidate = setRixCelCursor(documentLog, cursor);
+    const result = await evaluationWorker.request({ type: "commit", document: candidate, window: viewport });
+    bindProjection(result, name, { resetSession: false });
+    dirty = true;
+    persistRecovery();
+    setStatus(undoing ? "Undo restored" : "Redo restored");
+  } finally {
+    pendingCommit = false;
+    updateHistoryButtons();
+  }
 }
 async function moveWindow(rowDelta, columnDelta) {
   viewport.rowStart = Math.max(1, viewport.rowStart + rowDelta);
@@ -330,12 +421,91 @@ async function allowDocumentSwitch() {
     saveDocument();
   return true;
 }
+function coordinates(id, optional = false) {
+  const raw = document.querySelector(`#${id}`).value.trim();
+  if (!raw && optional)
+    return;
+  const values = raw.split(",").map((item) => item.trim() === "_" ? null : Number(item.trim()));
+  if (values.some((value) => value !== null && (!Number.isSafeInteger(value) || value < 1)))
+    throw new Error("Coordinates must be positive integers separated by commas");
+  return values;
+}
+async function tensorAction(action) {
+  if (pendingCommit)
+    throw new Error("An edit is still being saved");
+  pendingCommit = true;
+  updateHistoryButtons();
+  try {
+    const options = {
+      viewAxes: coordinates("tensor-axes"),
+      slice: coordinates("tensor-slice", true),
+      targetStart: coordinates("tensor-target"),
+      targetAxes: coordinates("tensor-target-axes")
+    };
+    const result = await evaluationWorker.request({ type: action, source: document.querySelector("#tensor-source").value, options, window: viewport });
+    if (action === "tensor-snapshot") {
+      documentLog = result.document;
+      workbookLog = result.workbook ?? null;
+      dirty = true;
+      persistRecovery();
+    }
+    renderProjection(result);
+    setStatus(action === "tensor-snapshot" ? "Tensor plane saved as exact values; undo restores the previous sheet" : action === "tensor-link" ? "Linked read-only tensor view; updates after sheet edits" : "Linked view closed");
+  } finally {
+    pendingCommit = false;
+    updateHistoryButtons();
+  }
+}
+async function regionAction(action) {
+  if (action === "region-selection") {
+    document.querySelector("#region-start").value = selectedIndex.join(",");
+    document.querySelector("#region-end").value = selectedIndex.join(",");
+    return;
+  }
+  const start = coordinates("region-start"), end = coordinates("region-end");
+  let event;
+  if (action === "region-format") {
+    const choice = document.querySelector("#region-style").value;
+    const styles = {
+      bold: { bold: true },
+      italic: { italic: true },
+      highlight: { background: "#fff2b3" },
+      right: { align: "right" },
+      exact: { numberFormat: "exact" },
+      decimal: { numberFormat: "decimal", precision: Number(document.querySelector("#region-precision").value) },
+      clear: { bold: null, italic: null, background: null, color: null, align: null, numberFormat: null, precision: null }
+    };
+    event = { type: "view:format", start, end, style: styles[choice] };
+  } else
+    event = { type: "view:region", name: document.querySelector("#region-name").value, start: action === "region-delete" ? null : start, end: action === "region-delete" ? null : end };
+  renderProjection(await commitEvent(event));
+}
+document.querySelector("#region-select").addEventListener("change", (event) => {
+  const region = replayRixCelDocument(documentLog).view.regions?.[event.target.value];
+  if (!region)
+    return;
+  document.querySelector("#region-name").value = event.target.value;
+  document.querySelector("#region-start").value = region.start.join(",");
+  document.querySelector("#region-end").value = region.end.join(",");
+});
 document.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]")?.dataset.action;
+  if (pendingCommit) {
+    setStatus("An edit is still being saved");
+    return;
+  }
+  if (action === "insert-row" || action === "insert-column") {
+    insertAxis(action === "insert-row" ? 1 : 2).catch((error) => setStatus(error.message));
+    return;
+  }
   if (!action)
     return;
   try {
-    if (action === "new") {
+    if (action.startsWith("tensor-"))
+      await tensorAction(action);
+    else if (action.startsWith("region-"))
+      await regionAction(action);
+    else if (action === "new") {
       if (await allowDocumentSwitch())
         await newDocument();
     } else if (action === "open") {
@@ -345,6 +515,8 @@ document.addEventListener("click", async (event) => {
       saveDocument();
     else if (action === "export-csv")
       await exportDelimited("csv");
+    else if (action === "export-xlsx")
+      await exportWorkbookXlsx();
     else if (action === "export-tsv")
       await exportDelimited("tsv");
     else if (action === "undo")
@@ -374,6 +546,24 @@ fileInput.addEventListener("change", async () => {
     setStatus(error.message || String(error));
   }
 });
+documentSelector.addEventListener("change", async () => {
+  if (pendingCommit) {
+    documentSelector.value = documentLog.id;
+    return;
+  }
+  if (documentLog.drafts.length) {
+    documentSelector.value = documentLog.id;
+    setStatus("Resolve formula drafts before switching documents");
+    return;
+  }
+  try {
+    const result = await evaluationWorker.request({ type: "select-document", id: documentSelector.value, window: { ...viewport, rowStart: 1, columnStart: 1 } });
+    bindProjection(result, name);
+  } catch (error) {
+    documentSelector.value = documentLog.id;
+    setStatus(error.message);
+  }
+});
 window.addEventListener("beforeunload", (event) => {
   if (!dirty)
     return;
@@ -384,7 +574,7 @@ window.addEventListener("pagehide", () => evaluationWorker.dispose(), { once: tr
 try {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
   if (saved?.document) {
-    await loadDocument(saved.document, saved.name);
+    await loadDocument(saved.document, saved.name, { activeDocument: saved.activeDocument });
     dirty = saved.dirty ?? true;
     persistRecovery();
     setStatus("Recovered local document");
@@ -397,5 +587,5 @@ try {
   setStatus("Local recovery failed; opened a new document");
 }
 
-//# debugId=E5A6E6FEBC28697F64756E2164756E21
+//# debugId=EC94130C9341CF4764756E2164756E21
 //# sourceMappingURL=main.js.map
