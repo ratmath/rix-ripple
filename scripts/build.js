@@ -12,9 +12,9 @@ const browserNodeShims = {
         build.onResolve({ filter: /^node:path$/ }, () => ({ path: "path", namespace: "rixcel-shim" }));
         build.onResolve({ filter: /^node:module$/ }, () => ({ path: "module", namespace: "rixcel-shim" }));
         build.onLoad({ filter: /.*/, namespace: "rixcel-shim" }, ({ path: shim }) => {
-            if (shim === "fs") return { contents: "export default { readFileSync() { throw new Error('File-system imports are unavailable in RiXCel.'); } };", loader: "js" };
-            if (shim === "path") return { contents: "export default { isAbsolute() { return false; }, resolve() { throw new Error('Local paths are unavailable in RiXCel.'); }, dirname() { return ''; } };", loader: "js" };
-            return { contents: "export function createRequire() { return () => { throw new Error('Module imports are unavailable in RiXCel.'); }; }", loader: "js" };
+            if (shim === "fs") return { contents: "export default { readFileSync() { throw new Error('File-system imports are unavailable in RiX Ripple.'); } };", loader: "js" };
+            if (shim === "path") return { contents: "export default { isAbsolute() { return false; }, resolve() { throw new Error('Local paths are unavailable in RiX Ripple.'); }, dirname() { return ''; } };", loader: "js" };
+            return { contents: "export function createRequire() { return () => { throw new Error('Module imports are unavailable in RiX Ripple.'); }; }", loader: "js" };
         });
     },
 };

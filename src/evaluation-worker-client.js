@@ -12,15 +12,15 @@ export class RixCelWorkerClient {
     }
 
     start() {
-        if (this.disposed) throw new Error("RiXCel evaluation worker has been disposed");
+        if (this.disposed) throw new Error("RiX Ripple evaluation worker has been disposed");
         if (this.worker) return this.worker;
         if (typeof this.WorkerConstructor !== "function") {
-            throw new Error("This browser does not support RiXCel evaluation workers");
+            throw new Error("This browser does not support RiX Ripple evaluation workers");
         }
         const worker = new this.WorkerConstructor(this.url, { type: "module", name: "rixcel-evaluation" });
         worker.addEventListener("message", (event) => this.receive(event.data));
         worker.addEventListener("error", (event) => {
-            this.failAll(new Error(event.message || "RiXCel evaluation worker failed"));
+            this.failAll(new Error(event.message || "RiX Ripple evaluation worker failed"));
             this.restart();
         });
         this.worker = worker;
@@ -33,7 +33,7 @@ export class RixCelWorkerClient {
         this.pending.delete(message.id);
         clearTimeout(entry.timer);
         if (message.type === "result") entry.resolve(message.value);
-        else entry.reject(new Error(message.message || "RiXCel evaluation failed"));
+        else entry.reject(new Error(message.message || "RiX Ripple evaluation failed"));
     }
 
     failAll(error) {
@@ -67,7 +67,7 @@ export class RixCelWorkerClient {
     dispose() {
         if (this.disposed) return;
         this.disposed = true;
-        this.failAll(new Error("RiXCel evaluation worker was disposed"));
+        this.failAll(new Error("RiX Ripple evaluation worker was disposed"));
         this.restart();
     }
 }

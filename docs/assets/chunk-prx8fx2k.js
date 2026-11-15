@@ -41266,12 +41266,12 @@ var formulaSheetFunctions = {
   RIXCELEXPORT: {
     pure: false,
     impl: rixCelExportCapability,
-    doc: "Serialize a FormulaSheet to canonical versioned RiXCel JSON"
+    doc: "Serialize a FormulaSheet to canonical versioned RiX Ripple JSON"
   },
   RIXCELIMPORT: {
     pure: false,
     impl: rixCelImportCapability,
-    doc: "Rebuild a FormulaSheet by compiling authoritative source from RiXCel JSON"
+    doc: "Rebuild a FormulaSheet by compiling authoritative source from RiX Ripple JSON"
   },
   RIXCELIMPORTCSV: {
     pure: false,
@@ -91970,7 +91970,7 @@ function createRixCelWorkbookHost(document, { withheld = [], ...options3 } = {})
 // ../../rix/src/runtime/rixcel-tensor.js
 var LIMIT = 4096;
 var fail5 = (message) => {
-  throw new Error(`RiXCel tensor plane: ${message}`);
+  throw new Error(`RiX Ripple tensor plane: ${message}`);
 };
 function axes2(value, rank, label3) {
   const result = value ?? (rank === 1 ? [1] : [1, 2]);

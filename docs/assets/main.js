@@ -29,16 +29,16 @@ class RixCelWorkerClient {
   }
   start() {
     if (this.disposed)
-      throw new Error("RiXCel evaluation worker has been disposed");
+      throw new Error("RiX Ripple evaluation worker has been disposed");
     if (this.worker)
       return this.worker;
     if (typeof this.WorkerConstructor !== "function") {
-      throw new Error("This browser does not support RiXCel evaluation workers");
+      throw new Error("This browser does not support RiX Ripple evaluation workers");
     }
     const worker = new this.WorkerConstructor(this.url, { type: "module", name: "rixcel-evaluation" });
     worker.addEventListener("message", (event) => this.receive(event.data));
     worker.addEventListener("error", (event) => {
-      this.failAll(new Error(event.message || "RiXCel evaluation worker failed"));
+      this.failAll(new Error(event.message || "RiX Ripple evaluation worker failed"));
       this.restart();
     });
     this.worker = worker;
@@ -53,7 +53,7 @@ class RixCelWorkerClient {
     if (message.type === "result")
       entry.resolve(message.value);
     else
-      entry.reject(new Error(message.message || "RiXCel evaluation failed"));
+      entry.reject(new Error(message.message || "RiX Ripple evaluation failed"));
   }
   failAll(error) {
     for (const entry of this.pending.values()) {
@@ -84,7 +84,7 @@ class RixCelWorkerClient {
     if (this.disposed)
       return;
     this.disposed = true;
-    this.failAll(new Error("RiXCel evaluation worker was disposed"));
+    this.failAll(new Error("RiX Ripple evaluation worker was disposed"));
     this.restart();
   }
 }
@@ -406,7 +406,7 @@ function confirmDocumentSwitch() {
   if (!dirty)
     return Promise.resolve("discard");
   if (!switchDialog?.showModal) {
-    return Promise.resolve(confirm("Save the current RiXCel document before continuing?") ? "save" : "cancel");
+    return Promise.resolve(confirm("Save the current RiX Ripple document before continuing?") ? "save" : "cancel");
   }
   switchDialog.showModal();
   return new Promise((resolve) => {
@@ -582,7 +582,7 @@ try {
     await newDocument();
   }
 } catch (error) {
-  console.warn("RiXCel local recovery failed", error);
+  console.warn("RiX Ripple local recovery failed", error);
   await newDocument();
   setStatus("Local recovery failed; opened a new document");
 }

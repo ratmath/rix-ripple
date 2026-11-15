@@ -329,7 +329,7 @@ async function moveWindow(rowDelta, columnDelta) {
 function confirmDocumentSwitch() {
     if (!dirty) return Promise.resolve("discard");
     if (!switchDialog?.showModal) {
-        return Promise.resolve(confirm("Save the current RiXCel document before continuing?") ? "save" : "cancel");
+        return Promise.resolve(confirm("Save the current RiX Ripple document before continuing?") ? "save" : "cancel");
     }
     switchDialog.showModal();
     return new Promise((resolve) => {
@@ -466,7 +466,7 @@ try {
         await newDocument();
     }
 } catch (error) {
-    console.warn("RiXCel local recovery failed", error);
+    console.warn("RiX Ripple local recovery failed", error);
     await newDocument();
     setStatus("Local recovery failed; opened a new document");
 }

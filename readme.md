@@ -1,6 +1,6 @@
-# RiXCel
+# RiX Ripple
 
-RiXCel is the standalone FormulaSheet editor for RiX. It uses exact RiX values,
+RiX Ripple is the standalone FormulaSheet editor for RiX. It uses exact RiX values,
 reactive formula dependencies, tensor-aware views, and the versioned `.rixcel`
 document format.
 

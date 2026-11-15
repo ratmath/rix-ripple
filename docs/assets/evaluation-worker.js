@@ -183,7 +183,7 @@ class RixCelEvaluationSession {
     } else if (event.type === "view:axis-label") {
       this.model.setAxisLabel(event.axis, event.coordinate, event.label);
     } else {
-      throw new Error(`Unsupported RiXCel session event: ${event.type}`);
+      throw new Error(`Unsupported RiX Ripple session event: ${event.type}`);
     }
   }
   commit(value) {
@@ -232,12 +232,12 @@ class RixCelEvaluationSession {
   }
   project(requestedWindow = {}, preparedTensorHtml = null) {
     if (!this.model || !this.document)
-      throw new Error("RiXCel worker has no open document");
+      throw new Error("RiX Ripple worker has no open document");
     const window = windowFor(this.document.shape, requestedWindow);
     if (this.workbook)
       prepareWorkbookWindow(this.workbook, this.document.id, window);
     const view = evaluate(this.state, `.Sheet(document, {=
-            title="RiXCel document",
+            title="RiX Ripple document",
             rowStart=${window.rowStart}, rowCount=${window.rowCount},
             columnStart=${window.columnStart}, columnCount=${window.columnCount}
         })`);
@@ -277,7 +277,7 @@ class RixCelEvaluationSession {
   }
   exportDelimited(kind) {
     if (!this.model)
-      throw new Error("RiXCel worker has no open document");
+      throw new Error("RiX Ripple worker has no open document");
     const fn = kind === "tsv" ? ".RiXCelExportTsv" : ".RiXCelExportCsv";
     return evaluate(this.state, `${fn}(document)`).value;
   }
@@ -351,7 +351,7 @@ class RixCelEvaluationSession {
       isolated.dispose();
       return result;
     }
-    throw new Error(`Unknown RiXCel worker request: ${request?.type || "missing type"}`);
+    throw new Error(`Unknown RiX Ripple worker request: ${request?.type || "missing type"}`);
   }
 }
 
