@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 
-describe("RiXCel standalone app", () => {
+describe("RiX Ripple standalone app", () => {
     test("exposes document, interchange, history, and save-before-switch controls", async () => {
         const html = await readFile(new URL("src/index.html", root), "utf8");
         for (const action of [

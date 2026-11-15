@@ -29,7 +29,7 @@ class FakeWorker {
     }
 }
 
-describe("restartable RiXCel worker client", () => {
+describe("restartable RiX Ripple worker client", () => {
     test("correlates successful requests", async () => {
         FakeWorker.instances = [];
         const client = new RixCelWorkerClient({ WorkerConstructor: FakeWorker, timeoutMs: 50 });

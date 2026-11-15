@@ -11,7 +11,7 @@ import {
     evaluateRixCelRequest,
 } from "../src/evaluation-runtime.js";
 
-describe("RiXCel worker evaluation runtime", () => {
+describe("RiX Ripple worker evaluation runtime", () => {
     test("withholds host, plugin, dynamic-code, and asynchronous capabilities", () => {
         const { systemContext } = createRixCelEvaluationState();
         for (const capability of RIXCEL_WITHHELD_CAPABILITIES) {

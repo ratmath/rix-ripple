@@ -1,7 +1,7 @@
 # XLSX value interchange
 
 Use **Open** to select an `.xlsx` file. Each Excel worksheet becomes an independent
-RiXCel document in a workbook; the document selector switches sheets. **Export XLSX
+RiX Ripple document in a workbook; the document selector switches sheets. **Export XLSX
 values** saves the current values of every document. Save `.rixbook` to retain live
 RiX formulas, owned names, cross-document exports, history and drafts.
 
